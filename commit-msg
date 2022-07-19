@@ -1,0 +1,168 @@
+#!/bin/bash
+
+corona_home=$CORONA_HOME
+
+
+#check Embold is disable
+commit_msg=$(cat "${1:?Missing commit message file}")
+commit_msg=$(echo "$commit_msg" | tr '[:upper:]' '[:lower:]')
+if [[ $commit_msg == *"embold --skip"* ]]; then
+	echo "Embold Gated commit disable"
+	echo -e "[Embold Gated commit disabled] \n\n*Current Corona Version* \n$corona_version" >> $1
+	exit 0
+fi
+
+#check if merge commit
+hash=`git rev-parse -q --verify MERGE_HEAD`
+if [[ ! -z "$hash" ]]
+then
+	exit 0
+fi
+
+#check CORONA_SCANNER_HOME is not empty
+
+corona_scanner_home=$EMBOLD_SCANNER_HOME
+if [[ -z "$corona_scanner_home" ]]
+then
+	echo -e "\n**CORONA_SCANNER_HOME is not defined.Set an environment variable CORONA_SCANNER_HOME to the location where the scanner-agent package is present.\n"
+	echo "For more information, please refer : $documentLink"
+	exit 1
+fi
+
+#random_str=`(head /dev/urandom | tr -dc A-Za-z0-9 | head -c 10 ; echo '')`
+temp_dir=$corona_home/temp/$(date +%y-%m-%d_%H-%M-%S)
+mkdir -p $temp_dir
+
+coronaDir=$temp_dir/Corona
+historicalScanDir=$temp_dir/HistoricalScan
+gatedCommitDir=$temp_dir/GatedCommit
+prevDir=$gatedCommitDir/prev
+currDir=$gatedCommitDir/current
+outputFile=$gatedCommitDir/GatedCommitCodeIssues.csv
+
+#delete unnecessary folders
+delete_folders () {
+
+
+	if [ -d "$coronaDir" ]
+	then
+	    rm -r $coronaDir
+	fi
+
+	if [ -d "$historicalScanDir" ]
+	then
+	    rm -r $historicalScanDir
+	fi
+
+	if [ -d "$prevDir" ]
+	then
+	    rm -r $prevDir
+	fi
+
+	if [ -d "$currDir" ]
+	then
+	    rm -r $currDir
+	fi
+
+}
+
+echo "Embold URL : $EMBOLD_URL"
+
+echo "Embold Analysis started, Please wait..."
+current_dir=$(pwd)
+pluginxml=$corona_home/corona/coronacli/config/plugins_empty.xml
+$corona_scanner_home/bin/embold-gatedcommit -b "$current_dir" -c "$current_dir" -d "$temp_dir" -r "git" -p $pluginxml -g -ds -u $EMBOLD_URL -t $EMBOLD_TOKEN -sh $CORONA_HOME -l "$temp_dir"> $corona_home/temp/gated_commit.log
+quality_gate_output_file=$temp_dir/GatedCommit/quality_gate_output.txt
+if [ ! -e $quality_gate_output_file ]
+then
+	echo "No supported languages for scan."
+	echo "Embold Analysis Passed"
+	echo -e "[Embold Analysis Passed] \n\n*Current Corona Version* \n$corona_version" >> $1
+	exit 0
+fi
+
+var=`cat $quality_gate_output_file | grep Status`
+statusline=`echo "$var" | cut -d$'\n' -f1`
+status=`echo "$statusline" | cut -c 8-`
+
+if [[ "$status" == "pass" ]]
+then
+	echo -e "[Embold Quality Gate:Passed] \n\n*Current Corona Version* \n$corona_version" >> $1
+	delete_folders
+	exit 0
+elif [ "$status" == "warning" ]
+then
+	echo -e "[Embold Quality Gate:Passed] \n\n*Current Corona Version* \n$corona_version" >> $1
+	while read line; do
+		echo $line
+	done < $quality_gate_output_file
+	delete_folders
+	exit 0
+elif [ "$status" == "EmboldFailed" ]
+then
+	echo -e "[Embold Analysis failed] \n\n*Current Corona Version* \n$corona_version" >> $1
+	while read line; do
+		echo $line
+	done < $quality_gate_output_file
+	delete_folders
+	exit 1
+else
+	if [[ $commit_msg == *"embold --force-commit"* ]]; then
+
+		while read line; do
+			  if [[ "$line" == "Fixed Issues"* ]]; then
+                commit_msg=$(echo "$line")
+                fixedCount=`echo "$commit_msg" | cut -d ":" -f2`
+				elif [[ "$line" == "Added Issues"* ]]; then
+				commit_msg=$(echo "$line")
+				addedCount=`echo "$commit_msg" | cut -d ":" -f2`
+				elif  [[ "$line" == "Existing Issues"* ]]; then
+				commit_msg=$(echo "$line")
+				existingCount=`echo "$commit_msg" | cut -d ":" -f2`
+				fi
+		done < $quality_gate_output_file
+			echo "Embold Quality Gate:Failed"
+		echo -e "[Embold Quality Gate:Failed] \n\n*Current Corona Version* \n$corona_version" >> $1
+		status_flag=false
+		while read line; do
+			if [ "$status_flag" = true ] ; then
+				echo $line >> $1
+			fi
+			if [ "$status_flag" = false ] ; then
+				status_flag=true
+			fi
+		    done < $quality_gate_output_file
+		if [[  (! -v addedCount && ! -v existingCount && ! -v fixedCount) || ($addedCount -eq "0" && ($existingCount -le "25" || $fixedCount -ge "10")) ]]; then
+		exit 0
+		else
+		echo -e "\nCommit is rejected as it does not match with the quality gate conditions. Below are the conditions : \n1)Added issues = 0 \n2)Fixed issues > 10 OR Existing issues < 25\n "
+
+		while read line; do
+			if [ "$status_flag" = true ] ; then
+				echo $line
+			fi
+			if [ "$status_flag" = false ] ; then
+				status_flag=true
+			fi
+		done < $quality_gate_output_file
+		delete_folders
+		exit 1
+		fi
+	else
+		echo -e "\nEmbold Quality Gate:Failed"
+		echo "Commit Status: Rejected"
+		echo -e "\n*Current Corona Version*  \n$corona_version\n"
+		status_flag=false
+		while read line; do
+			if [ "$status_flag" = true ] ; then
+				echo $line
+			fi
+			if [ "$status_flag" = false ] ; then
+				status_flag=true
+			fi
+		done < $quality_gate_output_file
+		echo  "** Please check file $outputFile to find detailed Embold scan results."
+		delete_folders
+		exit 1
+	fi
+fi
