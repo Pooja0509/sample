@@ -35,6 +35,8 @@ public class QualityGateStatus {
 
 	@Override
 	public String toString() {
+		System.out.println("");
+		System.out.println("");
 		return "QualityGateProfile [rule=" + rule + ", value="
 				+ value + ", option=" + option + ", condition="
 				+ condition + "]";
