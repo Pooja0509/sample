@@ -15,6 +15,7 @@ public class QualityGateStatus {
 	}
 
 	public String getRule() {
+		System.out.println("");
 		return rule;
 	}
 
