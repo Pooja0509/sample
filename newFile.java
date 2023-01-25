@@ -25,6 +25,7 @@ public class QualityGateStatus {
 	}
 
 	public String getOption() {
+		System.out.println("");
 		return option;
 	}
 
