@@ -30,6 +30,9 @@ public class QualityGateStatus {
 	}
 
 	public String getCondition() {
+		System.out.println("");
+		System.out.println("");
+		System.out.println("");
 		return condition;
 	}
 
