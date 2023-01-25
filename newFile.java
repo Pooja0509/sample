@@ -19,6 +19,7 @@ public class QualityGateStatus {
 	}
 
 	public int getValue() {
+		System.out.println("");
 		return value;
 	}
 
